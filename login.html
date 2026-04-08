@@ -38,7 +38,7 @@
       <div class="h-[94vh] mx-auto max-w-[52vw] xl:max-w-[620px] mt-[-5vh] relative">   
         <div class="relative w-full h-full rounded-3xl overflow-hidden shadow-[0_30px_70px_-12px_rgba(0,0,0,0.55)] ring-1 ring-black/5 bg-white">
           <img 
-            src="images/loginimage.png" 
+            src="/images/loginimage.png" 
             alt="Grande image motivation"
             class="absolute inset-0 w-full h-full object-cover"
           />
@@ -67,11 +67,10 @@
 
         <div class="text-center pt-1">
           <img 
-            src="images/logoorange.svg" 
+            src="/images/logoorange.svg" 
             alt="Myaffilinks Logo" 
             class="mx-auto block h-8 md:h-10 w-auto mb-3"
           />
-          <br /><br /><br />
         </div>
 
         <div class="text-center">
@@ -97,10 +96,11 @@
           </div>
         </div>
 
-        <button onclick="handleLogin()" 
-                class="block w-full bg-primary text-white text-center py-4 rounded-xl font-semibold hover:bg-primaryDark transition-all duration-200 shadow-md hover:shadow-lg">
+        <!-- Bouton modifié pour rediriger vers la vraie page de connexion email -->
+        <a href="loginemail.html" 
+           class="block w-full bg-primary text-white text-center py-4 rounded-xl font-semibold hover:bg-primaryDark transition-all duration-200 shadow-md hover:shadow-lg">
           <span class="mr-2 text-xl">✉</span> Se connecter avec l'e-mail
-        </button>
+        </a>
 
         <div class="text-center text-sm space-y-3 mt-8">
           <p class="text-gray-600">
@@ -116,38 +116,6 @@
     </div>
 
   </div>
-
-  <!-- Script Connexion Simple et Fiable -->
-  <script>
-    window.handleLogin = () => {
-      const email = prompt("Entrez votre email :");
-      const password = prompt("Entrez votre mot de passe :");
-
-      if (!email || !password) {
-        alert("Email et mot de passe sont obligatoires");
-        return;
-      }
-
-      // Vérification réelle pour ton compte admin
-      if (email.toLowerCase() === "ninomizrahininp@gmail.com") {
-        if (password.length >= 3) {   // On accepte tout mot de passe de 3 caractères ou plus pour l'instant
-          alert("✅ Connexion Admin réussie ! Bienvenue dans le panneau d'administration");
-          window.location.href = 'admin.html';
-        } else {
-          alert("Mot de passe incorrect");
-        }
-      } 
-      // Pour les autres utilisateurs
-      else {
-        if (password.length >= 3) {
-          alert("✅ Connexion réussie !");
-          window.location.href = 'nos-affilinks.html';
-        } else {
-          alert("Email ou mot de passe incorrect");
-        }
-      }
-    };
-  </script>
 
 </body>
 </html>
