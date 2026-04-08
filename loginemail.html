@@ -43,12 +43,11 @@
 
         status.innerHTML += `🔍 Recherche profil pour email: ${email}\n`
 
-        const { data: { user } } = await supabase.auth.getUser()
         
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select('role')
-          .eq('user.id', user.id)
+          .eq('email', email)
           .single()
 
         if (pError) {
