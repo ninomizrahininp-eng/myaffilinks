@@ -201,7 +201,7 @@
       .from('profiles')
       .select('total_clicks, total_sales, total_revenue')
       .eq('user_id', currentUser.id)
-      .single()
+      .maybeSingle()
 
     if (profile) {
       const clicks  = profile.total_clicks  ?? 0
@@ -237,14 +237,14 @@
         .from('link_clicks')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', currentUser.id)
-        .gte('created_at', d7ago.toISOString())
+        .gte('clicked_at', d7ago.toISOString())
 
       const { count: previous } = await supabase
         .from('link_clicks')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', currentUser.id)
-        .gte('created_at', d14ago.toISOString())
-        .lt('created_at', d7ago.toISOString())
+        .gte('clicked_at', d14ago.toISOString())
+        .lt('clicked_at', d7ago.toISOString())
 
       const badge = document.getElementById('dash-clicks-badge')
       if (previous > 0) {
@@ -447,13 +447,13 @@
     try {
       const { data: clickRows } = await supabase
         .from('link_clicks')
-        .select('created_at')
+        .select('clicked_at')
         .eq('user_id', user.id)
-        .gte('created_at', since30.toISOString())
+        .gte('clicked_at', since30.toISOString())
 
       if (clickRows?.length) {
         clickRows.forEach(row => {
-          const clickDate = new Date(row.created_at)
+          const clickDate = new Date(row.clicked_at)
           // Trouver l'index dans le tableau des 30 jours
           const idx = dates.findIndex(d =>
             d.getFullYear() === clickDate.getFullYear() &&
