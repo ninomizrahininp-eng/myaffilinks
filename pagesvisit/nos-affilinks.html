@@ -126,7 +126,6 @@
 
   // ── STATE ────────────────────────────────────────────────────────────────
   let currentUser        = null
-  let currentUsername    = null   // username récupéré depuis profiles
   let currentOffer       = null
   let currentTrackingUrl = null
 
@@ -142,8 +141,7 @@
         .select('plan, username')
         .eq('user_id', user.id)
         .single()
-      userPlan        = p?.plan     || 'free'
-      currentUsername = p?.username || null
+      userPlan = p?.plan || 'free'
       if (p?.username) {
         const el = document.getElementById('hero-username')
         if (el) el.innerHTML = `Bonjour ${p.username},<br/>prêt à te rapprocher<br/>de tes objectifs ?`
@@ -151,6 +149,7 @@
     }
 
     await loadOffers(userPlan)
+    setupClicksRealtime()
   }
 
   // ── CHARGER LES OFFRES ────────────────────────────────────────────────────
@@ -214,21 +213,17 @@
     }
   }
 
-  // ── CONSTRUIRE LE LIEN DE TRACKING ──────────────────────────────────────
-  // Format : https://myaffilinks-974ld.vercel.app/api/go?ref=USERNAME&offer=OFFER_ID
-  //
-  // Ce lien est celui que l'utilisateur partage sur Instagram, TikTok, etc.
-  // Quand quelqu'un clique dessus (depuis n'importe où) :
-  //   1. Vercel /api/go reçoit le clic → loggue dans link_clicks (Supabase)
-  //   2. Incrémente total_clicks dans profiles
-  //   3. Redirige vers l'URL de l'offre enregistrée dans l'admin
-  //      (ex: mama.com → redirige vers mama.com, destination inchangée)
-  //
-  // 100% des clics sont comptés, peu importe la plateforme source.
+  // ── CONSTRUIRE L'URL DE TRACKING via /api/go ──────────────────────────────
+  // Format : /api/go?ref=USER_ID&offer=OFFER_ID
+  // C'est la serverless function Vercel (go.js) qui :
+  //   1. insère dans link_clicks (Supabase)
+  //   2. redirige vers offer.url?ref=USER_ID
+  // YOURLS n'est plus utilisé — plus de dépendance localhost.
   function buildTrackingUrl(offer) {
-    const username = currentUsername || currentUser.id
-    const base     = window.location.origin
-    return `${base}/api/go?ref=${encodeURIComponent(username)}&offer=${encodeURIComponent(offer.id)}`
+    // En prod Vercel, window.location.origin = "https://ton-domaine.vercel.app"
+    // En local (Live Server), on utilise aussi l'origine courante
+    const base = window.location.origin
+    return `${base}/api/go?ref=${encodeURIComponent(currentUser.id)}&offer=${encodeURIComponent(offer.id)}`
   }
 
   // ── OUVRIR LA MODAL ───────────────────────────────────────────────────────
@@ -238,6 +233,7 @@
     currentOffer       = offer
     currentTrackingUrl = null
 
+    // Afficher la modal immédiatement
     document.getElementById('modal-offer-emoji').textContent   = offer.emoji || '📦'
     document.getElementById('modal-offer-title').textContent   = offer.title || '—'
     document.getElementById('modal-offer-company').textContent = offer.company || '—'
@@ -246,18 +242,21 @@
     document.getElementById('modal-clicks').textContent        = '…'
     document.getElementById('link-modal').classList.remove('hidden')
 
-    const trackingUrl  = await getOrCreateLink(offer)
+    // Récupérer ou créer l'entrée dans user_links (pour mémoriser que ce user a ce lien)
+    const trackingUrl = await getOrCreateLink(offer)
     currentTrackingUrl = trackingUrl
     document.getElementById('modal-tracking-url').textContent = trackingUrl
 
+    // Récupérer le vrai nombre de clics depuis Supabase link_clicks
     const clicks = await getClicksFromSupabase(offer.id)
     document.getElementById('modal-clicks').textContent = clicks.toLocaleString('fr-FR')
   }
 
-  // ── ENREGISTRER LE LIEN DANS user_links ──────────────────────────────────
+  // ── ENREGISTRER LE LIEN DANS user_links (sans YOURLS) ────────────────────
   async function getOrCreateLink(offer) {
     const trackingUrl = buildTrackingUrl(offer)
 
+    // Vérifier si déjà en base
     const { data: existing } = await supabase
       .from('user_links')
       .select('tracking_url')
@@ -265,12 +264,12 @@
       .eq('offer_id', offer.id)
       .maybeSingle()
 
+    // Si déjà enregistré → retourner le lien stocké
+    // (mais on reconstruit toujours avec buildTrackingUrl pour éviter les localhost sauvegardés)
     if (existing?.tracking_url) {
-      // Migration automatique des anciens formats (localhost, yourls, UUID brut)
-      const isOldFormat = existing.tracking_url.includes('localhost')
-        || existing.tracking_url.includes('yourls')
-        || !existing.tracking_url.includes('/api/go')
-      if (isOldFormat) {
+      // Si l'ancien lien est un localhost YOURLS, on le met à jour automatiquement
+      if (existing.tracking_url.includes('localhost') || existing.tracking_url.includes('yourls')) {
+        console.log('[affilinks] Mise à jour du lien localhost vers /api/go')
         await supabase
           .from('user_links')
           .update({ tracking_url: trackingUrl })
@@ -281,20 +280,22 @@
       return existing.tracking_url
     }
 
-    // Nouveau → insérer
-    const { error } = await supabase
+    // Nouveau lien → insérer
+    const { error: insertErr } = await supabase
       .from('user_links')
       .insert({
         user_id:      currentUser.id,
         offer_id:     offer.id,
         tracking_url: trackingUrl,
       })
-    if (error) console.error('[affilinks] insert user_links:', error)
+
+    if (insertErr) console.error('[affilinks] Supabase insert user_links:', insertErr)
 
     return trackingUrl
   }
 
   // ── COMPTER LES CLICS DEPUIS SUPABASE ────────────────────────────────────
+  // go.js insère dans link_clicks à chaque visite → on compte ici
   async function getClicksFromSupabase(offerId) {
     try {
       const { count } = await supabase
@@ -321,11 +322,37 @@
     }
   }
 
-  // ── ALLER SUR L'OFFRE ─────────────────────────────────────────────────────
-  // L'utilisateur clique → passe par /api/go → clic loggué → redirigé vers l'offre
+  // ── ALLER SUR L'OFFRE (via le lien de tracking) ───────────────────────────
   window.goToOffer = () => {
     if (!currentTrackingUrl) return
     window.open(currentTrackingUrl, '_blank')
+    // Rafraîchir le compteur après 2s (temps que go.js enregistre le clic)
+    setTimeout(async () => {
+      if (!currentOffer) return
+      const clicks = await getClicksFromSupabase(currentOffer.id)
+      const el = document.getElementById('modal-clicks')
+      if (el) el.textContent = clicks.toLocaleString('fr-FR')
+    }, 2000)
+  }
+
+  // ── REALTIME : mise à jour compteur si modal ouverte ──────────────────────
+  function setupClicksRealtime() {
+    supabase
+      .channel('affilinks-clicks-' + currentUser.id.slice(0, 8))
+      .on('postgres_changes', {
+        event:  'INSERT',
+        schema: 'public',
+        table:  'link_clicks',
+        filter: `user_id=eq.${currentUser.id}`
+      }, async () => {
+        const modal = document.getElementById('link-modal')
+        if (modal && !modal.classList.contains('hidden') && currentOffer) {
+          const clicks = await getClicksFromSupabase(currentOffer.id)
+          const el = document.getElementById('modal-clicks')
+          if (el) el.textContent = clicks.toLocaleString('fr-FR')
+        }
+      })
+      .subscribe()
   }
 
   // ── FERMER LA MODAL ───────────────────────────────────────────────────────
