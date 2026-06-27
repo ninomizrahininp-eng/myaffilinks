@@ -326,13 +326,9 @@
   window.goToOffer = () => {
     if (!currentTrackingUrl) return
     window.open(currentTrackingUrl, '_blank')
-    // Rafraîchir le compteur après 2s (temps que go.js enregistre le clic)
-    setTimeout(async () => {
-      if (!currentOffer) return
-      const clicks = await getClicksFromSupabase(currentOffer.id)
-      const el = document.getElementById('modal-clicks')
-      if (el) el.textContent = clicks.toLocaleString('fr-FR')
-    }, 2000)
+    // ✅ FIX : plus de setTimeout fragile (2s trop court sur cold start Vercel).
+    // Le compteur est mis à jour automatiquement par le canal Realtime Supabase
+    // qui écoute les INSERT sur link_clicks ci-dessous.
   }
 
   // ── REALTIME : mise à jour compteur si modal ouverte ──────────────────────
