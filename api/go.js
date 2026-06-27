@@ -86,6 +86,7 @@ export default async function handler(req, res) {
                     || req.socket?.remoteAddress
                     || null,
         user_agent: req.headers['user-agent'] || null,
+        clicked_at: new Date().toISOString(),   // ✅ FIX : horodatage explicite
       })
       .then(({ error }) => {
         if (error) console.error('[go.js] link_clicks insert error:', error.message)
