@@ -76,48 +76,81 @@ export default async function handler(req, res) {
     // Le tracking est fait en amont (link_clicks + total_clicks).
     const finalUrl = offer.url
 
-    // ── 4. Insérer le clic dans link_clicks (non-bloquant) ────────────────
-    const clickPromise = supabase
-      .from('link_clicks')
-      .insert({
-        user_id:    userId,
-        offer_id:   offerId,
-        ip:         req.headers['x-forwarded-for']?.split(',')[0].trim()
-                    || req.socket?.remoteAddress
-                    || null,
-        user_agent: req.headers['user-agent'] || null,
-        clicked_at: new Date().toISOString(),   // ✅ FIX : horodatage explicite
-      })
-      .then(({ error }) => {
-        if (error) console.error('[go.js] link_clicks insert error:', error.message)
-      })
+    // ── 4. Anti-triche : déduplication IP + User Agent sur 24h ───────────
+    const ip        = req.headers['x-forwarded-for']?.split(',')[0].trim()
+                      || req.socket?.remoteAddress
+                      || null
+    const userAgent = req.headers['user-agent'] || null
+    const since24h  = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-    // ── 5. Incrémenter total_clicks (non-bloquant) ────────────────────────
-    const incrPromise = supabase
-      .rpc('increment_clicks', { uid: userId })
-      .then(({ error }) => {
-        if (error) {
-          console.warn('[go.js] RPC indisponible, fallback manual:', error.message)
-          return supabase
-            .from('profiles')
-            .select('total_clicks')
-            .eq('user_id', userId)
-            .maybeSingle()
-            .then(({ data: p }) => {
-              if (!p) return
-              return supabase
-                .from('profiles')
-                .update({ total_clicks: (p.total_clicks ?? 0) + 1 })
-                .eq('user_id', userId)
-            })
-        }
-      })
+    let isDuplicate = false
 
-    Promise.all([clickPromise, incrPromise]).catch(err =>
-      console.error('[go.js] tracking error:', err)
-    )
+    if (ip) {
+      // On cherche un clic identique (même IP + même user_agent + même offre) dans les 24h
+      let query = supabase
+        .from('link_clicks')
+        .select('id', { count: 'exact', head: true })
+        .eq('offer_id', offerId)
+        .eq('ip', ip)
+        .gte('clicked_at', since24h)
 
-    // ── 6. Rediriger ──────────────────────────────────────────────────────
+      // Si on a un user_agent, on l'ajoute au filtre pour éviter les faux positifs
+      // sur des IP partagées légitimes (école, entreprise, etc.)
+      if (userAgent) {
+        query = query.eq('user_agent', userAgent)
+      }
+
+      const { count, error: dedupError } = await query
+
+      if (dedupError) {
+        console.warn('[go.js] Dedup check error (on laisse passer):', dedupError.message)
+      } else if (count > 0) {
+        isDuplicate = true
+        console.log(`[go.js] Clic dupliqué ignoré — IP: ${ip}, offer: ${offerId}`)
+      }
+    }
+
+    // ── 5. Insérer le clic + incrémenter uniquement si non-dupliqué ───────
+    if (!isDuplicate) {
+      const clickPromise = supabase
+        .from('link_clicks')
+        .insert({
+          user_id:    userId,
+          offer_id:   offerId,
+          ip,
+          user_agent: userAgent,
+          clicked_at: new Date().toISOString(),
+        })
+        .then(({ error }) => {
+          if (error) console.error('[go.js] link_clicks insert error:', error.message)
+        })
+
+      const incrPromise = supabase
+        .rpc('increment_clicks', { uid: userId })
+        .then(({ error }) => {
+          if (error) {
+            console.warn('[go.js] RPC indisponible, fallback manual:', error.message)
+            return supabase
+              .from('profiles')
+              .select('total_clicks')
+              .eq('user_id', userId)
+              .maybeSingle()
+              .then(({ data: p }) => {
+                if (!p) return
+                return supabase
+                  .from('profiles')
+                  .update({ total_clicks: (p.total_clicks ?? 0) + 1 })
+                  .eq('user_id', userId)
+              })
+          }
+        })
+
+      Promise.all([clickPromise, incrPromise]).catch(err =>
+        console.error('[go.js] tracking error:', err)
+      )
+    }
+
+    // ── 6. Rediriger (toujours, même si clic dupliqué) ───────────────────
     return res.redirect(302, finalUrl)
 
   } catch (err) {
